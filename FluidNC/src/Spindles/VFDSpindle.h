@@ -8,6 +8,8 @@
 
 #include "Uart.h"
 
+class Channel;
+
 namespace Spindles {
     extern Uart _uart;
 
@@ -63,6 +65,10 @@ namespace Spindles {
         void validate() override;
         void afterParse() override;
         void group(Configuration::HandlerBase& handler) override;
+
+        void exec_modbus_command(const std::string& fmt, Channel& out);
+
+        VFDSpindle* asVFD() override { return this; }
 
         virtual ~VFDSpindle() {}
     };

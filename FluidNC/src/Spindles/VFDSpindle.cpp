@@ -20,10 +20,14 @@
 */
 #include "VFDSpindle.h"
 #include "VFD/VFDProtocol.h"
+#include "VFD/GenericProtocol.h"
 
 #include "Machine/MachineConfig.h"
 #include "Protocol.h"  // rtAlarm
 #include "Report.h"    // hex message
+#include "Logging.h"
+#include "NutsBolts.h"  // to_hex
+#include "Channel.h"
 #include "Configuration/HandlerType.h"
 
 #include <freertos/task.h>
@@ -224,5 +228,49 @@ namespace Spindles {
 
         Spindle::group(handler);
         detail_->group(handler);
+    }
+
+    void VFDSpindle::exec_modbus_command(const std::string& fmt, Channel& out) {
+        if (!_uart) {
+            log_string(out, "Error: VFD UART not initialized");
+            return;
+        }
+
+        VFD::VFDProtocol::ModbusCommand cmd;
+        GenericProtocol::send_vfd_command(fmt, cmd, 0);
+
+        // Stamp device ID and append CRC
+        VFD::VFDProtocol::addFraming(this, cmd);
+
+        // Log the framed TX to the user channel
+        {
+            LogStream msg(out, "TX:");
+            for (int i = 0; i < cmd.tx_length; ++i) {
+                msg << " " << to_hex(cmd.msg[i]);
+            }
+        }
+
+        // Send and receive
+        uint8_t rx_message[VFD::VFDProtocol::VFD_RS485_MAX_MSG_SIZE];
+        size_t  read_length = VFD::VFDProtocol::sendAndReceive(this, *_uart, cmd, rx_message);
+
+        if (read_length == 0) {
+            log_string(out, "No response");
+            return;
+        }
+
+        // Log RX to user channel
+        {
+            LogStream msg(out, "RX:");
+            for (size_t i = 0; i < read_length; ++i) {
+                msg << " " << to_hex(rx_message[i]);
+            }
+        }
+
+        if (!VFD::VFDProtocol::checkRx(cmd, rx_message, read_length, _modbus_id)) {
+            log_string(out, "CRC/length mismatch");
+        } else {
+            log_string(out, "ok");
+        }
     }
 }

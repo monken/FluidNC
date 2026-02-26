@@ -18,6 +18,7 @@
 
 namespace Spindles {
     class Spindle;
+    class VFDSpindle;
     using SpindleList = std::vector<Spindle*>;
 
     // This is the base class. Do not use this as your spindle
@@ -70,6 +71,8 @@ namespace Spindles {
         virtual bool   tool_change(uint32_t tool_number, bool pre_select, bool set_tool);
 
         virtual void setSpeedfromISR(uint32_t dev_speed) = 0;
+
+        virtual VFDSpindle* asVFD() { return nullptr; }
 
         void spinDown() { setState(SpindleState::Disable, 0); }
 

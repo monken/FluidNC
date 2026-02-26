@@ -3,6 +3,8 @@
 #include <cstdint>
 #include "Spindles/Spindle.h"
 
+class Uart;
+
 namespace Spindles {
     class VFDSpindle;
 
@@ -64,14 +66,24 @@ namespace Spindles {
             static TaskHandle_t  vfd_cmdTaskHandle;
             static void          vfd_cmd_task(void* pvParameters);
 
-            static uint16_t ModRTU_CRC(uint8_t* buf, size_t msg_len);
+
             bool            prepareSetModeCommand(SpindleState mode, ModbusCommand& data, VFDSpindle* spindle);
             bool            prepareSetSpeedCommand(uint32_t speed, ModbusCommand& data, VFDSpindle* spindle);
 
             static void reportParsingErrors(ModbusCommand cmd, uint8_t* rx_message, size_t read_length);
-            static bool checkRx(ModbusCommand cmd, uint8_t* rx_message, size_t read_length, uint8_t id);
 
         public:
+            // Fills in device ID at msg[0] and appends the two CRC bytes.
+            // Must be called once on a command before passing it to sendAndReceive.
+            static void addFraming(VFDSpindle* instance, ModbusCommand& cmd);
+
+            // Sends cmd over uart, reads back up to cmd.rx_length bytes into rx_message,
+            // applies the Huanyang zero-byte workaround, and debug-logs TX/RX when
+            // instance->_debug > 2.  Returns the number of bytes actually received.
+            static size_t sendAndReceive(VFDSpindle* instance, Uart& uart, ModbusCommand& cmd, uint8_t* rx_message);
+
+            static bool checkRx(ModbusCommand cmd, uint8_t* rx_message, size_t read_length, uint8_t id);
+            static uint16_t ModRTU_CRC(uint8_t* buf, size_t msg_len);
             static QueueHandle_t vfd_speed_queue;
 
             VFDProtocol() {}
