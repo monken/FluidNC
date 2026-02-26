@@ -4,6 +4,9 @@
 #include "GenericProtocol.h"
 
 #include "Spindles/VFDSpindle.h"
+#include "Spindles/Spindle.h"
+#include "Settings.h"
+#include "Logging.h"
 
 #include "string_util.h"
 #include <algorithm>

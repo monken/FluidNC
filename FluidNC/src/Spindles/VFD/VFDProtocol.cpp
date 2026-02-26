@@ -2,6 +2,7 @@
 
 #include "Spindles/VFDSpindle.h"
 #include "MotionControl.h"  // mc_critical
+#include "Report.h"         // hex_msg
 
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -18,6 +19,40 @@ namespace Spindles {
         TaskHandle_t  VFDProtocol::vfd_cmdTaskHandle = nullptr;
 
         void VFDProtocol::reportParsingErrors(ModbusCommand cmd, uint8_t* rx_message, size_t read_length) {}
+
+        void VFDProtocol::addFraming(VFDSpindle* instance, ModbusCommand& cmd) {
+            cmd.msg[0]               = instance->_modbus_id;
+            auto crc16               = ModRTU_CRC(cmd.msg, cmd.tx_length);
+            cmd.msg[cmd.tx_length++] = (crc16 & 0xFF);
+            cmd.msg[cmd.tx_length++] = (crc16 & 0xFF00) >> 8;
+            cmd.rx_length += 2;
+        }
+
+        size_t VFDProtocol::sendAndReceive(VFDSpindle* instance, Uart& uart, ModbusCommand& cmd, uint8_t* rx_message) {
+            if (instance->_debug > 2) {
+                hex_msg(cmd.msg, "RS485 Tx: ", cmd.tx_length);
+            }
+
+            uart.flush();
+            uart.flushRx();
+            uart.write(cmd.msg, cmd.tx_length);
+            uart.flushTxTimed(response_ticks);
+
+            size_t read_length = uart.timedReadBytes(rx_message, cmd.rx_length, response_ticks);
+
+            // Apparently some Huanyang report modbus errors in the correct way
+            // and others do not.  Check for the condition and truncate the first byte.
+            if (read_length > 0 && instance->_modbus_id != 0 && rx_message[0] == 0) {
+                log_debug("Huanyang workaround");
+                memmove(rx_message + 1, rx_message, read_length - 1);
+            }
+
+            if (instance->_debug > 2) {
+                hex_msg(rx_message, "RS485 Rx: ", read_length);
+            }
+
+            return read_length;
+        }
         bool VFDProtocol::checkRx(ModbusCommand cmd, uint8_t* rx_message, size_t read_length, uint8_t id) {
             if (read_length == 0) {
                 log_info("RS485 No response");
@@ -130,45 +165,15 @@ namespace Spindles {
                     }
                 }
 
-                // At this point cmd has been filled with a command block
-                // Fill in the fields that are the same for all protocol variants
-                cmd.msg[0] = instance->_modbus_id;
-
-                // Grabbed the command. Add the CRC16 checksum:
-                auto crc16               = ModRTU_CRC(cmd.msg, cmd.tx_length);
-                cmd.msg[cmd.tx_length++] = (crc16 & 0xFF);
-                cmd.msg[cmd.tx_length++] = (crc16 & 0xFF00) >> 8;
-                cmd.rx_length += 2;
+                // At this point cmd has been filled with a command block.
+                // Stamp device ID, compute and append CRC.
+                addFraming(instance, cmd);
 
                 // Assume for the worst, and retry...
                 size_t retry_count = 0;
                 for (; retry_count < instance->_retries; ++retry_count) {
-                    if (instance->_debug > 2) {
-                        hex_msg(cmd.msg, "RS485 Tx: ", cmd.tx_length);
-                    }
-
-                    // Flush the UART and write the data:
-                    uart.flush();
-                    uart.flushRx();
-                    uart.write(cmd.msg, cmd.tx_length);
-                    uart.flushTxTimed(response_ticks);
-
-                    // Read the response
-                    size_t read_length  = 0;
-                    size_t current_read = uart.timedReadBytes(rx_message, cmd.rx_length, response_ticks);
-                    read_length += current_read;
-                    unresponsive = read_length != 0;
-
-                    // Apparently some Huanyang report modbus errors in the correct way
-                    // and others do not.  Check for the condition and truncate the first byte.
-                    if (read_length > 0 && instance->_modbus_id != 0 && rx_message[0] == 0) {
-                        log_debug("Huanyang workaround");
-                        memmove(rx_message + 1, rx_message, read_length - 1);
-                    }
-
-                    if (instance->_debug > 2) {
-                        hex_msg(rx_message, "RS485 Rx: ", read_length);
-                    }
+                    size_t read_length = sendAndReceive(instance, uart, cmd, rx_message);
+                    unresponsive       = read_length != 0;
 
                     if (checkRx(cmd, rx_message, read_length, instance->_modbus_id)) {
                         // The response is well-formed

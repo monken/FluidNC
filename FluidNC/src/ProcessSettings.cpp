@@ -25,6 +25,8 @@
 #include "Driver/backtrace.h"     // backtrace_get(), etc.
 #include "FileCommands.h"         // make_file_commands()
 #include "Job.h"                  // Job::active()
+#include "Spindles/VFDSpindle.h"  // VFDSpindle::exec_modbus_command()
+#include "Spindles/Spindle.h"     // spindle
 
 #include "FluidPath.h"
 #include "HashFS.h"
@@ -979,6 +981,20 @@ static Error sendAlarm(const char* value, AuthenticationLevel auth_level, Channe
     return Error::Ok;
 }
 
+static Error vfdCommand(const char* value, AuthenticationLevel auth_level, Channel& out) {
+    auto* vfdSpindle = spindle->asVFD();
+    if (!vfdSpindle) {
+        log_string(out, "Error: current spindle is not a VFD spindle");
+        return Error::InvalidValue;
+    }
+    if (!value || *value == '\0') {
+        log_string(out, "Usage: $VFD=<format>   e.g. $VFD=06 20 00 00 12 > echo");
+        return Error::Ok;
+    }
+    vfdSpindle->exec_modbus_command(std::string(value), out);
+    return Error::Ok;
+}
+
 static Error showHeap(const char* value, AuthenticationLevel auth_level, Channel& out) {
     log_info("Heap free: " << xPortGetFreeHeapSize() << " min: " << heapLowWater);
     return Error::Ok;
@@ -1047,6 +1063,7 @@ void make_user_commands() {
     new UserCommand("RST", "Settings/Restore", restore_settings, notIdleOrAlarm, WA);
 
     new UserCommand("SA", "Alarm/Send", sendAlarm, anyState);
+    new UserCommand("VFD", "VFD/Command", vfdCommand, anyState);
     new UserCommand("Heap", "Heap/Show", showHeap, anyState);
     new UserCommand("SS", "Startup/Show", showStartupLog, anyState);
     new UserCommand("BS", "Backtrace/Show", showBacktrace, anyState);
